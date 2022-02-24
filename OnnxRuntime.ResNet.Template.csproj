@@ -10,6 +10,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.10.0" />
     <PackageReference Include="Sixlabors.ImageSharp" Version="2.0.0" />
     <PackageReference Include="System.Numerics.Tensors" Version="6.0.0-rtm.21522.10" />
+    <PackageReference Include="System.Numerics.Vectors" Version="4.5.0" />
   </ItemGroup>
 
 </Project>

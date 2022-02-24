@@ -3,6 +3,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
 using System.Numerics.Tensors;
+using System.Numerics;
 
 namespace OnnxRuntime.ResNet.Template
 {
@@ -43,6 +44,38 @@ namespace OnnxRuntime.ResNet.Template
             });
 
             Memory<float> memory = input.Buffer.Slice(0);
+            var span = memory.Span;
+            var strides = input.Strides;
+            Int32[] stridesRepacked = new Int32[8] { strides[0], strides[1], strides[2], strides[3], strides[0], strides[1], strides[2], strides[3] };
+            
+            var strideVector = new Vector<Int32>(stridesRepacked);
+            
+            
+            
+            image.ProcessPixelRows(pixelAccessor =>
+            {
+                for (var y = 0; y < image.Height; y++)
+                {
+                    var pixelSpan = pixelAccessor.GetRowSpan(y);
+                    for (int x = 0; x < image.Width; x++)
+                    {
+                        // Create the dot product of the coordinates to calculate the position of the pixel.
+                        var indexArray = new Int32[8] { 0, 0, x, y, 0, 0, x, y };
+                        var indexVector = new Vector<Int32>(indexArray);
+                        var indexRed = Vector.Dot(strideVector, indexVector);
+
+                        var indexArrayGreen = new Int32[8] { 0, 1, x, y, 0, 1, x, y };
+                        var indexVectorGreen = new Vector<Int32>(indexArrayGreen);
+                        var indexGreen = Vector.Dot(strideVector, indexVectorGreen);
+
+                        var indexArrayBlue = new Int32[8] { 0, 2, x, y, 0, 2, x, y };
+                        var indexVectorBlue = new Vector<Int32>(indexArrayBlue);
+                        var indexBlue = Vector.Dot(strideVector, indexVectorBlue);
+                        Console.WriteLine($"{indexRed} {indexGreen} {indexBlue}");
+
+                    }
+                }
+            });
 
             Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> tensor = new Microsoft.ML.OnnxRuntime.Tensors.DenseTensor<float>(memory, new[] { 1, 3, 224, 224 });
             return tensor;
