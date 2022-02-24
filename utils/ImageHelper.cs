@@ -43,15 +43,16 @@ namespace OnnxRuntime.ResNet.Template
                 }
             });
 
-            Memory<float> memory = input.Buffer.Slice(0);
-            var span = memory.Span;
+
+            // Faster conversion from RGB to Tensor?
+            DenseTensor<float> input_faster = new DenseTensor<float>(new[] { 1, 3, 224, 224 });
+            Memory<float> memory = input_faster.Buffer.Slice(0);
+            //Span<float> span = memory.Span;
             var strides = input.Strides;
-            Int32[] stridesRepacked = new Int32[8] { strides[0], strides[1], strides[2], strides[3], strides[0], strides[1], strides[2], strides[3] };
+            float[] stridesRepacked = new float[] { strides[0], strides[1], strides[2], strides[3] };
             
-            var strideVector = new Vector<Int32>(stridesRepacked);
-            
-            
-            
+            var strideVector = new Vector4(stridesRepacked);
+
             image.ProcessPixelRows(pixelAccessor =>
             {
                 for (var y = 0; y < image.Height; y++)
@@ -60,22 +61,28 @@ namespace OnnxRuntime.ResNet.Template
                     for (int x = 0; x < image.Width; x++)
                     {
                         // Create the dot product of the coordinates to calculate the position of the pixel.
-                        var indexArray = new Int32[8] { 0, 0, x, y, 0, 0, x, y };
-                        var indexVector = new Vector<Int32>(indexArray);
-                        var indexRed = Vector.Dot(strideVector, indexVector);
+                        var indexArray = new float[4] { 0, 0, y, x};
+                        var indexVector = new Vector4(indexArray);
+                        var indexRed = (int)Vector4.Dot(strideVector, indexVector);
 
-                        var indexArrayGreen = new Int32[8] { 0, 1, x, y, 0, 1, x, y };
-                        var indexVectorGreen = new Vector<Int32>(indexArrayGreen);
-                        var indexGreen = Vector.Dot(strideVector, indexVectorGreen);
+                        var indexArrayGreen = new float[4] { 0, 1, y, x};
+                        var indexVectorGreen = new Vector4(indexArrayGreen);
+                        var indexGreen = (int)Vector4.Dot(strideVector, indexVectorGreen);
 
-                        var indexArrayBlue = new Int32[8] { 0, 2, x, y, 0, 2, x, y };
-                        var indexVectorBlue = new Vector<Int32>(indexArrayBlue);
-                        var indexBlue = Vector.Dot(strideVector, indexVectorBlue);
-                        Console.WriteLine($"{indexRed} {indexGreen} {indexBlue}");
+                        var indexArrayBlue = new float[4] { 0, 2, y, x };
+                        var indexVectorBlue = new Vector4(indexArrayBlue);
+                        var indexBlue = (int)Vector4.Dot(strideVector, indexVectorBlue);
+
+                        //Console.WriteLine($"{indexRed} {indexGreen} {indexBlue}");
+
+                        memory.Span[indexRed] = ((pixelSpan[x].R / 255f) - mean[0]) / stddev[0];
+                        memory.Span[indexGreen] = ((pixelSpan[x].G / 255f) - mean[1]) / stddev[1];
+                        memory.Span[indexBlue] = ((pixelSpan[x].B / 255f) - mean[2]) / stddev[2];
 
                     }
                 }
             });
+
 
             Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> tensor = new Microsoft.ML.OnnxRuntime.Tensors.DenseTensor<float>(memory, new[] { 1, 3, 224, 224 });
             return tensor;
