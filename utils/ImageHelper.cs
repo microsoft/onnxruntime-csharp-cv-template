@@ -1,16 +1,14 @@
-﻿using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
+﻿using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Numerics.Tensors;
 
 namespace OnnxRuntime.ResNet.Template
 {
     public static class ImageHelper
     {
-        public static Tensor<float> GetImageTensorFromPath(string imageFilePath, int imgWidth = 224, int imgHeight=224)
+        public static Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> GetImageTensorFromPath(string imageFilePath, int imgWidth = 224, int imgHeight=224)
         {
             // Read image
             using Image<Rgb24> image = Image.Load<Rgb24>(imageFilePath);
@@ -26,7 +24,7 @@ namespace OnnxRuntime.ResNet.Template
             });
 
             // Preprocess image
-            Tensor<float> input = new DenseTensor<float>(new[] { 1, 3, 224, 224 });
+            DenseTensor<float> input = new DenseTensor<float>(new[] { 1, 3, 224, 224 });
             var mean = new[] { 0.485f, 0.456f, 0.406f };
             var stddev = new[] { 0.229f, 0.224f, 0.225f };
 
@@ -44,7 +42,10 @@ namespace OnnxRuntime.ResNet.Template
                 }
             });
 
-            return input;
+            Memory<float> memory = input.Buffer.Slice(0);
+
+            Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> tensor = new Microsoft.ML.OnnxRuntime.Tensors.DenseTensor<float>(memory, new[] { 1, 3, 224, 224 });
+            return tensor;
         }
     }
 }
