@@ -69,8 +69,7 @@ namespace OnnxRuntime.ResNet.Template
 
             for (var j = 0; j < numberBatches; j++)
             {
-                Console.WriteLine($"         Batch: {j + 1} of {numberBatches}");
-                // Correct for a full batch
+
                 inputDimension[0] = batchSizes[j];
 
                 // Need to directly use a DenseTensor here because we need access to the underlying span.
@@ -107,9 +106,9 @@ namespace OnnxRuntime.ResNet.Template
                             // Now we can just directly loop through and copy the values directly from span to span.
                             for (int x = 0; x < image.Width; x++)
                             {
-                                spanR[x] = rowSpan[x].R;
-                                spanG[x] = rowSpan[x].G;
-                                spanB[x] = rowSpan[x].B;
+                                spanR[x] = ((rowSpan[x].R / 255f) - mean[0]) / stddev[0];
+                                spanG[x] = ((rowSpan[x].G / 255f) - mean[1]) / stddev[1];
+                                spanB[x] = ((rowSpan[x].B / 255f) - mean[2]) / stddev[2];
                             }
                         }
                     });
