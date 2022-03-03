@@ -1,16 +1,23 @@
 ﻿using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using System;
-using System.Numerics.Tensors;
-using System.Numerics;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace OnnxRuntime.ResNet.Template
 {
     public static class ImageHelper
     {
-        public static Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> GetImageTensorFromPath(string imageFilePath, int imgWidth = 224, int imgHeight=224)
+        /// <summary>
+        /// Gets the image, and creates a tensor ready for use in OnnxRuntime
+        /// </summary>
+        /// <param name="imageFilePath"></param>
+        /// <param name="imgWidth"></param>
+        /// <param name="imgHeight"></param>
+        /// <returns></returns>
+        public static List<DenseTensor<float>> GetImageTensorFromPath(string imageFilePath, int imgWidth = 224, int imgHeight=224)
         {
             // Read image
             using Image<Rgb24> image = Image.Load<Rgb24>(imageFilePath);
@@ -29,84 +36,148 @@ namespace OnnxRuntime.ResNet.Template
             var mean = new[] { 0.485f, 0.456f, 0.406f };
             var stddev = new[] { 0.229f, 0.224f, 0.225f };
 
-            // Original Method
-            var memory = RGBToTensorOriginal(images, mean, stddev);
+            // Shape of the input tensor to the OnnxRuntime model
+            var inputDimensions = new int[] {1, 3, 224, 224};
 
+            var tensors = ImageToTensor(images, mean, stddev, inputDimensions);
 
-            // Faster conversion from RGB to Tensor?
-            var memory = RGBToTensorDirectEdit(images, mean, stddev);
-
-
-            Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> tensor = new Microsoft.ML.OnnxRuntime.Tensors.DenseTensor<float>(memory, new[] { 1, 3, 224, 224 });
-            return tensor;
+            return tensors;
         }
 
-        private static Memory<float> RGBToTensorOriginal(List<Image<Rgb24>> images, float[] mean, float[] stddev)
+        /// <summary>
+        /// Converts the list of images into batches and list of input tensors.
+        /// </summary>
+        /// <param name="images"></param>
+        /// <param name="mean"></param>
+        /// <param name="stddev"></param>
+        /// <param name="inputDimension">The size of the tensor that the OnnxRuntime model is expecting [1, 3, 224, 224] </param>
+        /// <returns></returns>
+        private static List<DenseTensor<float>> ImageToTensor(List<Image<Rgb24>> images, float[] mean, float[] stddev, int[] inputDimension)
         {
-            DenseTensor<float> input = new DenseTensor<float>(new[] { images.Count, 3, 224, 224});
+            // Used to create more than one batch
+            int numberBatches = 1;
 
-            for (var i=0; i < images.Count; i++)
+            // If required, can create batches of different sizes
+            var batchSizes = new int[] {images.Count};
+
+            // Keep track of which tile we are using to create multiple batches.
+            int tileIndex = 0;
+
+            var strides = GetStrides(inputDimension);
+
+            var inputs = new List<DenseTensor<float>>();
+
+            for (var j = 0; j < numberBatches; j++)
             {
-                images[i].ProcessPixelRows(pixelAccessor =>
+                Console.WriteLine($"         Batch: {j + 1} of {numberBatches}");
+                // Correct for a full batch
+                inputDimension[0] = batchSizes[j];
+
+                // Need to directly use a DenseTensor here because we need access to the underlying span.
+                DenseTensor<float> input = new DenseTensor<float>(inputDimension);
+
+                // This is the index used to get the stride offsets for the span.
+                // mdIndex[0] = row in the batch.
+                // mdIndex[1] = either 1/2/3 depending on if its for RBG
+                // mdIndex[2] = y value corresponding to the current image height
+                // mdIndex[3] = Always 0 since we want the start index of the x values
+                int[] mdIndex = new int[4];
+                mdIndex[3] = 0;
+                for (var i = 0; i < batchSizes[j]; i++)
                 {
-                    for (var y = 0; y < images[i].Height; y++)
+                    mdIndex[0] = i;
+                    var image = images[tileIndex];
+                    image.ProcessPixelRows(pixelAccessor =>
                     {
-                        var pixelSpan = pixelAccessor.GetRowSpan(y);
-                        for (int x = 0; x < images[i].Width; x++)
+                        var inputSpan = input.Buffer.Span;
+                        for (var y = 0; y < image.Height; y++)
                         {
-                            input[i, 0, y, x] = ((pixelSpan[x].R / 255f) - mean[0]) / stddev[0];
-                            input[i, 1, y, x] = ((pixelSpan[x].G / 255f) - mean[1]) / stddev[1];
-                            input[i, 2, y, x] = ((pixelSpan[x].B / 255f) - mean[2]) / stddev[2];
+                            mdIndex[2] = y;
+
+                            var rowSpan = pixelAccessor.GetRowSpan(y);
+
+                            // Update the mdIndex based on R/G/B and get a span to the underlying memory
+                            mdIndex[1] = 0;
+                            var spanR = inputSpan.Slice(GetIndex(strides, mdIndex), image.Width);
+                            mdIndex[1] = 1;
+                            var spanG = inputSpan.Slice(GetIndex(strides, mdIndex), image.Width);
+                            mdIndex[1] = 2;
+                            var spanB = inputSpan.Slice(GetIndex(strides, mdIndex), image.Width);
+
+                            // Now we can just directly loop through and copy the values directly from span to span.
+                            for (int x = 0; x < image.Width; x++)
+                            {
+                                spanR[x] = rowSpan[x].R;
+                                spanG[x] = rowSpan[x].G;
+                                spanB[x] = rowSpan[x].B;
+                            }
                         }
-                    }
-                });
+                    });
+
+                    tileIndex++;
+                    inputs.Add(input);
+                }
             }
 
-            var memory = input.Buffer.Slice(0);
-            return memory;
+            return inputs;
         }
 
 
-        private static Memory<float> RGBToTensorDirectEdit(List<Image<Rgb24>> images, float[] mean, float[] stddev)
+        /// <summary>
+        /// Gets the set of strides that can be used to calculate the offset of n-dimensions in a 1-dimensional layout
+        /// </summary>
+        /// <param name="dimensions"></param>
+        /// <param name="reverseStride"></param>
+        /// <returns></returns>
+        public static int[] GetStrides(ReadOnlySpan<int> dimensions, bool reverseStride = false)
         {
-            DenseTensor<float> input_faster = new DenseTensor<float>(new[] {images.Count, 3, 224, 224});
-            Memory<float> memory = input_faster.Buffer.Slice(0);
-            var strides = input_faster.Strides;
-            float[] stridesRepacked = new float[] {strides[0], strides[1], strides[2], strides[3]};
+            int[] strides = new int[dimensions.Length];
 
-            var strideVector = new Vector4(stridesRepacked);
-            for (var i = 0; i < images.Count; i++)
+            if (dimensions.Length == 0)
             {
-                images[i].ProcessPixelRows(pixelAccessor =>
-                {
-                    for (var y = 0; y < images[i].Height; y++)
-                    {
-                        var pixelSpan = pixelAccessor.GetRowSpan(y);
-                        for (int x = 0; x < images[i].Width; x++)
-                        {
-                            // Create the dot product of the coordinates to calculate the position of the pixel.
-                            var indexArray = new float[4] {i, 0, y, x};
-                            var indexVector = new Vector4(indexArray);
-                            var indexRed = (int) Vector4.Dot(strideVector, indexVector);
-
-                            var indexArrayGreen = new float[4] {i, 1, y, x};
-                            var indexVectorGreen = new Vector4(indexArrayGreen);
-                            var indexGreen = (int) Vector4.Dot(strideVector, indexVectorGreen);
-
-                            var indexArrayBlue = new float[4] {i, 2, y, x};
-                            var indexVectorBlue = new Vector4(indexArrayBlue);
-                            var indexBlue = (int) Vector4.Dot(strideVector, indexVectorBlue);
-
-                            //Console.WriteLine($"{indexRed} {indexGreen} {indexBlue}");
-
-                            memory.Span[indexRed] = ((pixelSpan[x].R / 255f) - mean[0]) / stddev[0];
-                            memory.Span[indexGreen] = ((pixelSpan[x].G / 255f) - mean[1]) / stddev[1];
-                            memory.Span[indexBlue] = ((pixelSpan[x].B / 255f) - mean[2]) / stddev[2];
-                        }
-                    }
-                });
+                return strides;
             }
-            return memory;
+
+            int stride = 1;
+            if (reverseStride)
+            {
+                for (int i = 0; i < strides.Length; i++)
+                {
+                    strides[i] = stride;
+                    stride *= dimensions[i];
+                }
+            }
+            else
+            {
+                for (int i = strides.Length - 1; i >= 0; i--)
+                {
+                    strides[i] = stride;
+                    stride *= dimensions[i];
+                }
+            }
+
+            return strides;
+        }
+
+
+        /// <summary>
+        /// Calculates the 1-d index for n-d indices in layout specified by strides.
+        /// </summary>
+        /// <param name="strides"></param>
+        /// <param name="indices"></param>
+        /// <param name="startFromDimension"></param>
+        /// <returns></returns>
+        public static int GetIndex(int[] strides, ReadOnlySpan<int> indices, int startFromDimension = 0)
+        {
+            Debug.Assert(strides.Length == indices.Length);
+
+            int index = 0;
+            for (int i = startFromDimension; i < indices.Length; i++)
+            {
+                index += strides[i] * indices[i];
+            }
+
+            return index;
         }
     }
 }

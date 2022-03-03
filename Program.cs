@@ -14,15 +14,20 @@ namespace OnnxRuntime.ResNet.Template
             string modelFilePath = @"C:\code\onnxruntime-templates\onnxruntime-csharp-cv-template\model\resnet50v2.onnx";
             string imageFilePath = @"C:\code\onnxruntime-templates\onnxruntime-csharp-cv-template\data\dog.jpeg";
 
-            var input = ImageHelper.GetImageTensorFromPath(imageFilePath);
-            var top10 = ModelHelper.GetPredictions(input, modelFilePath);
-
-            // Print results to console
-            Console.WriteLine("Top 10 predictions for ResNet50 v2...");
-            Console.WriteLine("--------------------------------------------------------------");
-            foreach (var t in top10)
+            var inputs = ImageHelper.GetImageTensorFromPath(imageFilePath);
+            foreach (var input in inputs)
             {
-                Console.WriteLine($"Label: {t.Label}, Confidence: {t.Confidence}");
+                var top10 = ModelHelper.GetPredictions(input, modelFilePath);
+
+                // Print results to console
+                Console.WriteLine("Top 10 predictions for ResNet50 v2...");
+                Console.WriteLine("--------------------------------------------------------------");
+                foreach (var t in top10)
+                {
+                    Console.WriteLine($"Label: {t.Label}, Confidence: {t.Confidence}");
+                }
+
+                Console.WriteLine();
             }
         }
     }
