@@ -76,6 +76,10 @@ namespace OnnxRuntime.ResNet.Template
             var normG = mean[1] / stddev[1];
             var normB = mean[2] / stddev[2];
 
+            var stdNormR = 1 / (255f * stddev[0]);
+            var stdNormG = 1 / (255f * stddev[1]);
+            var stdNormB = 1 / (255f * stddev[2]);
+
             for (var j = 0; j < numberBatches; j++)
             {
 
@@ -104,15 +108,15 @@ namespace OnnxRuntime.ResNet.Template
                             var spanG = inputSpan.Slice(index, image.Width);
                             index += strides[1];
                             var spanB = inputSpan.Slice(index, image.Width);
-                            index += strides[1];
 
                             // Now we can just directly loop through and copy the values directly from span to span.
                             for (int x = 0; x < image.Width; x++)
                             {
-                                spanR[x] = (rowSpan[x].R / (255f * stddev[0])) - normR;
-                                spanG[x] = (rowSpan[x].G / (255f * stddev[1])) - normG;
-                                spanB[x] = (rowSpan[x].B / (255f * stddev[2])) - normB;
+                                spanR[x] = (rowSpan[x].R * stdNormR) - normR;
+                                spanG[x] = (rowSpan[x].G * stdNormG) - normG;
+                                spanB[x] = (rowSpan[x].B * stdNormB) - normB;
                             }
+
                         }
                     });
                     
